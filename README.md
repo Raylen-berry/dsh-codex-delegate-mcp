@@ -14,10 +14,21 @@ It does not expose the current Codex desktop conversation. It uses the Codex acc
 - `danger-full-access` is never available.
 - The server uses stdio; it does not open a network port.
 
+## Get it
+
+The public repository is `dsh-codex-delegate-mcp`; clone it and the folder name
+becomes the repo name, not the `dsh-codex-delegate-mcp` shorthand used in the
+examples below. Clone it anywhere, then adjust two machine-local facts in
+`dsh-codex-delegate.cordis.patch.yml`: the `args` path to `server.mjs`, and
+`CODEX_BINARY`, which must point at a real `codex` executable (an `.exe`; on
+Windows a `.cmd` shim fails a shell-less stdio spawn). `CODEX_DELEGATE_ROOT` and
+`CODEX_DELEGATE_WRITE_ROOT` are pinned to one root for the bridge's whole
+lifetime — widen or move them to change the scope.
+
 ## Enable in DSH
 
-The folder location and the interpreter path are baked into the patch, so keep this folder where it is:
-`D:\DeepSeek\dsh-codex-delegate-mcp`.
+The folder location and the interpreter path are baked into the patch, so keep this folder where it is on
+this machine: `D:\DeepSeek\dsh-codex-delegate-mcp` (see "Get it" above for a fresh clone elsewhere).
 
 For a terminal / CLI run:
 
