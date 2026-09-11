@@ -1,0 +1,6 @@
+# 本机运行期审计日志：含本机绝对路径与本机任务文本，不进版本库
+dsh-inbound-audit.jsonl
+
+# 本地备份
+*.bak
+*.orig.bak

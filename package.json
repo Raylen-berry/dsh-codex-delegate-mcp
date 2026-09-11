@@ -1,0 +1,19 @@
+{
+  "name": "dsh-codex-delegate-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Local stdio MCP bridge that lets DeepSeek Harness delegate scoped tasks to Codex CLI.",
+  "bin": {
+    "dsh-codex-delegate-mcp": "./server.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Raylen-berry/dsh-codex-delegate-mcp.git"
+  },
+  "homepage": "https://github.com/Raylen-berry/dsh-codex-delegate-mcp#readme",
+  "license": "MIT"
+}

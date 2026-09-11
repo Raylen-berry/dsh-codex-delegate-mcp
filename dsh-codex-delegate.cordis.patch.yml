@@ -1,0 +1,42 @@
+# DSH → Codex 委派桥（0.2.0：官方 codex mcp-server 引擎 + 治理代理）
+# 用法一（离线校验，不启动服务）：
+#   dsh web --dump-config --patch .\dsh-codex-delegate-mcp\dsh-codex-delegate.cordis.patch.yml
+# 用法二（CLI 启动）：
+#   dsh web --patch .\dsh-codex-delegate-mcp\dsh-codex-delegate.cordis.patch.yml
+# 用法三（Desktop 应用，argv 由 app 自己拼）：把下面的 - insert: 段并进
+#   %DSH_HOME%\profiles\web\cordis.patch.yml
+#   —— 该层被监视，保存即热应用，不需要重启 Desktop。
+#
+# 相对原版的几处修订：
+#   1. command 必须是真实 exe：本机 `node` 解析到 .desktop-bin\node.cmd，stdio spawn
+#      不经 shell，Node 20+ 对 .cmd 会直接 EINVAL/ENOENT。
+#   2. server.mjs 用绝对路径：原写法依赖 process.cwd() 恰好在插件包父目录。
+#   3. 补 CODEX_BINARY：本机 codex 不在 PATH 上（只有 .codex\plugins\.plugin-appserver\codex.exe）。
+#   4. failOnStartupError 改为 false：桥挂了只丢这个工具，不拖垮整个 harness 启动。
+#   5. toolCallTimeoutMs 提到 960000：必须大于桥内 timeout_seconds 上限 900s，
+#      否则传输层先超时，Codex 的响应会被丢掉而调用侧看不到结果。
+#   6. 0.2.0 起引擎换成 codex mcp-server，server.mjs 只做治理代理；
+#      不再需要 CODEX_DELEGATE_ALLOW_WRITE 之外的参数透传（config/model/base-instructions 一律不转发）。
+- insert:
+    - id: mcp-codex-delegate
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: codex
+        transport: stdio
+        command: 'C:\Program Files\nodejs\node.exe'
+        args:
+          - 'D:\DeepSeek\dsh-codex-delegate-mcp\server.mjs'
+        env:
+          CODEX_DELEGATE_ROOT: 'D:\DeepSeek'
+          CODEX_DELEGATE_ALLOW_WRITE: 'true'
+          # 写围栏：workspace-write 只能落在这个子树内，越界在 spawn 之前拒绝。
+          # 收回写权限：ALLOW_WRITE 改回 'false'。
+          CODEX_DELEGATE_WRITE_ROOT: 'D:\DeepSeek\DeepSeek子代理'
+          CODEX_BINARY: 'C:\Users\Administrator\.codex\plugins\.plugin-appserver\codex.exe'
+          # 改 server.mjs 后把 REV +1：只有配置真的产生 diff，宿主才会重挂 stdio 子进程。
+          # 注意：重挂会重启常驻引擎，未结束的 threadId 随之失效（codex 报 Session not found）。
+          # 临时诊断（原始 item 落盘）：加 CODEX_BRIDGE_DEBUG: '<路径>' 并 bump REV。
+          CODEX_BRIDGE_REV: '13'
+        cwd: 'D:\DeepSeek'
+        toolCallTimeoutMs: 960000
+        failOnStartupError: false
