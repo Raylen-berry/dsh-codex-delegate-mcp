@@ -305,7 +305,7 @@ pruned on the next list. There is no writer lock: the bridge process is the only
 | `error` | `{kind, detail}` — the failure/cancel reason as recorded |
 | `startedAt` / `finishedAt` / `durationMs` | wall clock; while running, `finishedAt` is `null` |
 | `threadId` / `resumedFrom` / `resumable` | the Codex thread this run used, and whether it can still be continued |
-| `engineGeneration` | generations of the bridge engine since the last retirement; `0` means no engine was live |
+| `engineGeneration` | the bridge engine's generation for that run, reset to `0` when the engine retires — the number answers "was an engine live, and is this the one a later restart replaced", not "how many engines has this process ever started" |
 | `promptChars` / `promptHead` | length, plus the **first 200 characters only**, redacted |
 | `result` | tail of the final text, token total, rate-limit window |
 | `workspace` / `mode` / `timeoutSeconds` / `pid` | the request as the bridge pinned it |
@@ -313,7 +313,7 @@ pruned on the next list. There is no writer lock: the bridge process is the only
 `kind` is one of: `timeout`, `policy`, `client_cancel`, `engine_lost`, `tool_error`, `thread_lost`,
 `refused` (the bridge refused before spawning), `completed`.
 
-### Three query/resume tools (all read-only, all additive)
+### Three new tools (two read-only, one that runs Codex again)
 
 | Tool | What it does |
 | --- | --- |
