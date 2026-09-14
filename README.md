@@ -36,11 +36,27 @@ Measured locally (Node 24.9.0):
 | --- | --- |
 | `tools/verify-engine-restart.mjs` | 3 passed (fake engine = a `mcp-server` script this suite writes itself; real Codex is never called) |
 | `tools/verify-runs.mjs` | 58 passed (same fake-engine trick, plus a scenario file; covers the run ledger and cancel/resume/retry) |
+| `tools/verify-config-drift.mjs` | 19 passed (checks the drift checker against synthetic configs in a temp dir + one read-only run over the real pair) |
 
-Nothing is excluded in this repo. Both suites are offline: `CODEX_BINARY` points at `node` itself and the
+Nothing is excluded in this repo. All suites are offline: `CODEX_BINARY` points at `node` itself and the
 fake engine is a script the suite writes into its own temp workspace, so no model is called and no
 network is touched. `tools/run-all.mjs` fails the whole run if a new `tools/verify-*.mjs` is not
 registered in its `SUITES` list, so a suite cannot be added silently.
+
+**Test isolation is asserted, not assumed.** The ledger defaults to
+`$DSH_HOME/dsh-codex-delegate-mcp/runs/`, and the suites start a *real* `server.mjs` that inherits this
+process's environment — so a local `npm test` wrote fake delegation records into the user's real data
+directory once (measured 2026-09-14: 24 rows of the restart fixture leaked into the live ledger). Two
+independent guards now prevent that:
+
+1. `tools/run-all.mjs` runs every suite with
+   `CODEX_DELEGATE_RUNS_DIR=<os.tmpdir()>/dsh-codex-delegate-runs-selftest-<pid>`, so a suite — including
+   one added later — cannot reach `$DSH_HOME` even by omitting it. Each of the two suites that start a
+   bridge also sets that variable itself, so running a single file directly is equally safe.
+2. After the suites finish, `run-all.mjs` re-reads the **real** `$DSH_HOME/dsh-codex-delegate-mcp/runs/`
+   and compares file-level sha256 against the snapshot taken before them. Any added, removed or changed
+   file makes the whole run exit 1. When that directory does not exist (CI), it reports "not applicable"
+   rather than failing.
 
 ### Reverse verification of the run ledger
 
@@ -156,7 +172,7 @@ Pass that id back as `resume_session` to continue the **same** Codex conversatio
 
 ## Reloading after editing server.mjs
 
-The harness spawns the bridge once, at mount. Editing `server.mjs` alone changes nothing, and touching only its mtime changes nothing either: the layer re-applies on a **config diff**. Bump `CODEX_BRIDGE_REV` to force the stdio child to respawn and pick up new code.
+The harness spawns the bridge once, at mount. Editing `server.mjs` alone changes nothing, and touching only its mtime changes nothing either: the layer re-applies on a **config diff**. Bump `CODEX_BRIDGE_REV` — in the **live** copy under `%DSH_HOME%\profiles\web\cordis.patch.yml`, past whatever value it already has — to force the stdio child to respawn and pick up new code. The repo template's copy of that key is documentation; see "Which copy of the config actually takes effect" above, and use `tools/check-config-drift.mjs` to see whether the two copies currently agree.
 
 ## Verified on 2026-09-04, through DSH's own MCP client (codex-cli 0.148.0-alpha.9)
 
@@ -181,6 +197,35 @@ Cost note: one delegated run persists a ~60–80 KB `rollout-*.jsonl`, and `--ep
 - Codex CLI authenticated on the same machine
 
 No npm package installation is required for this MCP server itself.
+
+## Which copy of the config actually takes effect (and why the repo one is only a template)
+
+On DSH Desktop the bridge is mounted from **`%DSH_HOME%\profiles\web\cordis.patch.yml`** — the profile's
+user patch layer. `dsh-codex-delegate.cordis.patch.yml` in this repo is a **template**: editing it mounts
+nothing by itself. It is useful for `--patch` CLI runs, for `--dump-config` validation, and as the
+documented shape of the block.
+
+That means two hand-maintained copies of one block, which drift — measured on 2026-09-14: the live file
+was already at `CODEX_BRIDGE_REV: '14'` (untouched since 09-11) while this repo still said `13`, so
+"aligning the repo to 14" produced **no config diff** and the host would not have respawned the stdio
+child — the new tools would simply not appear. Two rules came out of it:
+
+- **Bump `CODEX_BRIDGE_REV` in both copies** whenever `server.mjs` changes behavior, and bump it *past*
+  whatever the live copy currently says. Equal values mean no diff, and no diff means no remount.
+  (Remounting restarts the resident engine, so open `threadId`s die with `Session not found`.)
+- **Check for drift instead of trusting the copies.** `tools/check-config-drift.mjs` is a read-only
+  comparison of the two files' key values (including `CODEX_BRIDGE_REV`):
+
+  ```powershell
+  node tools\check-config-drift.mjs                 # 0 = consistent / 1 = drift / 2 = usage problem
+  node tools\check-config-drift.mjs --live <path> --template <path>
+  ```
+
+  A key written in one copy but omitted in the other counts as equal (≈) only where the omitted value is
+  the built-in default — which is why `CODEX_DELEGATE_RUNS_DIR` shows as ≈ and not as drift. This check
+  is what a "config is actually applied" doctor step should own; until `dsh-doctor` exists, this script
+  is that check. `tools/verify-config-drift.mjs` asserts the checker itself (19 assertions, all against
+  synthetic copies in a temp dir) so a wrong verdict cannot pass silently.
 
 ## 0.2.0 — engine semantics (measured 2026-09-08)
 

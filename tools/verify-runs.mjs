@@ -28,6 +28,13 @@ const WORK = path.join(ROOT, 'workspace')
 const RUNS_DIR = path.join(ROOT, 'runs')
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
+// 台账目录钉在本套件的临时区里：默认落点是 $DSH_HOME/dsh-codex-delegate-mcp/runs/，而本套件起的
+// 是真 server.mjs（继承环境）⇒ 不钉就会把测试记录写进用户真实数据目录（2026-09-14 实测污染过）。
+// run-all.mjs 统一注入过一层；这里保留本地兜底，单独 `node tools/verify-runs.mjs` 也安全。
+if (typeof process.env.CODEX_DELEGATE_RUNS_DIR !== 'string' || process.env.CODEX_DELEGATE_RUNS_DIR.length === 0) {
+  process.env.CODEX_DELEGATE_RUNS_DIR = RUNS_DIR
+}
+
 let pass = 0
 let fail = 0
 const failures = []

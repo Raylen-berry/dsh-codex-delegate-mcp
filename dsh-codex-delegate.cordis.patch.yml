@@ -42,7 +42,7 @@
           # 改 server.mjs 后把 REV +1：只有配置真的产生 diff，宿主才会重挂 stdio 子进程。
           # 注意：重挂会重启常驻引擎，未结束的 threadId 随之失效（codex 报 Session not found）。
           # 临时诊断（原始 item 落盘）：加 CODEX_BRIDGE_DEBUG: '<路径>' 并 bump REV。
-          CODEX_BRIDGE_REV: '14'
+          CODEX_BRIDGE_REV: '15'
         cwd: 'D:\DeepSeek'
         toolCallTimeoutMs: 960000
         failOnStartupError: false

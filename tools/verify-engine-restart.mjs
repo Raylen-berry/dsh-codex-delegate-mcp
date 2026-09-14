@@ -44,6 +44,13 @@ if (process.env.CODEX_SERVER_BEFORE) {
 fs.rmSync(ROOT, { recursive: true, force: true })
 const WORK = path.join(ROOT, 'workspace')
 fs.mkdirSync(WORK, { recursive: true })
+// 台账目录必须钉在**本套件自己的临时区**：桥的默认落点是 $DSH_HOME/dsh-codex-delegate-mcp/runs/，
+// 而本套件起的是真 server.mjs（继承环境）⇒ 本机开发时会把假委派记录写进用户真实数据目录
+// （2026-09-14 实测污染过 24 行）。run-all.mjs 也会统一注入，这里再本地兜一层：单独跑本文件同样安全。
+if (typeof process.env.CODEX_DELEGATE_RUNS_DIR !== 'string' || process.env.CODEX_DELEGATE_RUNS_DIR.length === 0) {
+  process.env.CODEX_DELEGATE_RUNS_DIR = path.join(ROOT, 'runs')
+}
+fs.mkdirSync(process.env.CODEX_DELEGATE_RUNS_DIR, { recursive: true })
 // 引擎进程的 env 是 server.mjs 裁剪过的，所以日志**不能靠环境变量**传：
 // 假引擎把启动记录写在它自己的目录（= allowedRoot = WORK）里。
 const LOG = path.join(WORK, 'fake-launches.log')
