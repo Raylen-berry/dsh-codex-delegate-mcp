@@ -277,7 +277,14 @@ function startEngine() {
         entry.settle({ ok: false, reason, text: '', threadId: '', events: entry.events })
       }
       state.pending.clear()
-      if (engine === state) engine = null
+      // 退役标记必须**留得住**：下面会把 engine 置 null，而 readyEngine() 正是靠它
+      // 判断"当前这个 promise 对应的引擎还能不能用"。少了这一句，退出之后 engine 变 null，
+      // 守卫就再也看不出"已退役"，直接把那个已经 resolve 的旧 promise 返回回去
+      // ⇒ 后续请求拿到一个 exited 的 state，往死进程里写 JSON-RPC（2026-09-14 审计 P1）。
+      if (engine === state) {
+        engine = null
+        engineRetired = true
+      }
     }
 
     // Our stdout is reserved for the MCP protocol; forward engine noise to stderr.
@@ -327,12 +334,17 @@ function startEngine() {
 }
 
 let enginePromise = null
+// engine 退出后会被置 null，所以"还能不能用"不能只看 engine 是否为空 —— 必须另留一个
+// 退役标记，否则退出后引擎会被永久判为"可用"（见 failAll 里的注释）。
+let engineRetired = true
 
 function readyEngine() {
-  if (enginePromise !== null && !(engine !== null && engine.exited)) return enginePromise
+  if (enginePromise !== null && engineRetired === false && !(engine !== null && engine.exited)) return enginePromise
   engine = null
+  engineRetired = false
   enginePromise = startEngine().catch((error) => {
     enginePromise = null
+    engineRetired = true                     // 起不来也算退役，下次请求重新初始化
     throw error
   })
   return enginePromise
