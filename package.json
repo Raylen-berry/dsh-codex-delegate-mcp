@@ -1,6 +1,6 @@
 {
   "name": "dsh-codex-delegate-mcp",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "description": "Local stdio MCP bridge that lets DeepSeek Harness delegate scoped tasks to Codex CLI.",

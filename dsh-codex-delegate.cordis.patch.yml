@@ -17,6 +17,9 @@
 #      否则传输层先超时，Codex 的响应会被丢掉而调用侧看不到结果。
 #   6. 0.2.0 起引擎换成 codex mcp-server，server.mjs 只做治理代理；
 #      不再需要 CODEX_DELEGATE_ALLOW_WRITE 之外的参数透传（config/model/base-instructions 一律不转发）。
+#   7. 0.3.0 起每次委派留一条可查的运行记录，落盘在 runs/ 下（一天一个 JSONL），
+#      并新增 list_codex_runs / get_codex_run / retry_codex_run 三个工具；
+#      delegate_to_codex 的入参、出参与沙箱语义未改动（只多一行 Run: <runId>）。
 - insert:
     - id: mcp-codex-delegate
       name: '@deepseek-ai/dsh-mcp-client'
@@ -33,10 +36,13 @@
           # 收回写权限：ALLOW_WRITE 改回 'false'。
           CODEX_DELEGATE_WRITE_ROOT: 'D:\DeepSeek\DeepSeek子代理'
           CODEX_BINARY: 'C:\Users\Administrator\.codex\plugins\.plugin-appserver\codex.exe'
+          # 运行记录台账目录（一行一次状态变化；一天一个 JSONL）。
+          # 不设也等价：默认 $DSH_HOME\dsh-codex-delegate-mcp\runs。想换盘/换目录就改这里。
+          CODEX_DELEGATE_RUNS_DIR: 'C:\Users\Administrator\AppData\Roaming\dsh-desktop\harness\dsh-codex-delegate-mcp\runs'
           # 改 server.mjs 后把 REV +1：只有配置真的产生 diff，宿主才会重挂 stdio 子进程。
           # 注意：重挂会重启常驻引擎，未结束的 threadId 随之失效（codex 报 Session not found）。
           # 临时诊断（原始 item 落盘）：加 CODEX_BRIDGE_DEBUG: '<路径>' 并 bump REV。
-          CODEX_BRIDGE_REV: '13'
+          CODEX_BRIDGE_REV: '14'
         cwd: 'D:\DeepSeek'
         toolCallTimeoutMs: 960000
         failOnStartupError: false

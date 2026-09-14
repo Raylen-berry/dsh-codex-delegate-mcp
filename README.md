@@ -35,9 +35,21 @@ Measured locally (Node 24.9.0):
 | Suite | Local result |
 | --- | --- |
 | `tools/verify-engine-restart.mjs` | 3 passed (fake engine = a `mcp-server` script this suite writes itself; real Codex is never called) |
+| `tools/verify-runs.mjs` | 58 passed (same fake-engine trick, plus a scenario file; covers the run ledger and cancel/resume/retry) |
 
-Nothing is excluded in this repo.
+Nothing is excluded in this repo. Both suites are offline: `CODEX_BINARY` points at `node` itself and the
+fake engine is a script the suite writes into its own temp workspace, so no model is called and no
+network is touched. `tools/run-all.mjs` fails the whole run if a new `tools/verify-*.mjs` is not
+registered in its `SUITES` list, so a suite cannot be added silently.
 
+### Reverse verification of the run ledger
+
+`CODEX_SERVER=<path to another server.mjs> node tools/verify-runs.mjs` points the *same* assertions at a
+different build. Measured against the pre-0.3.0 `server.mjs` materialized from `git HEAD` in a temp
+`git worktree`: **14 passed / 34 failed, exit 1** — the old build has no run records at all, so every
+record assertion fails. (Report the failure count, not "the suite is green": the 14 that still pass are
+the ones whose subject exists in both builds, such as a `DELEGATION FAILED` header still being present,
+or a secret-absence check that trivially holds when nothing was recorded.)
 ## Get it
 
 The public repository is `dsh-codex-delegate-mcp`; clone it and the folder name
@@ -253,5 +265,98 @@ Measured here: an inbound task runs **workspace-writable** inside the requested 
 | inbound write inside the root | pass — file created by the inner DSH agent, content checked on disk |
 | MCP boot without `default_tools_approval_mode` | failed with `user cancelled MCP tool call` (documented above) |
 | guard without `env_vars` | silently depth 0 → guard never fires (documented above) |
+
+## 0.3.0 — run ledger: 批次 / 当前步骤 / 失败原因 / 产物 + 取消 · 续跑 · 仅重试失败项
+
+Every `delegate_to_codex` call now leaves **one queryable record**. The ledger is an added side channel:
+`delegate_to_codex`'s input schema, sandbox policy, error wording and result body are unchanged, except
+for one added header line `Run: <runId> [status/kind]`.
+
+```text
+Codex completed the delegated task.
+Run: 4c95c806-3070-4ff9-af4d-670806c329e0 [succeeded/completed]
+Thread: 01a07fef-4494-76d3-b674-9ae5821898ec
+…
+Steps: 3
+Artifacts: 1 (C:\Users\…\AppData\Roaming\dsh-desktop\harness\dsh-codex-delegate-mcp\runs)
+```
+
+### Where it is stored
+
+`$DSH_HOME/dsh-codex-delegate-mcp/runs/YYYY-MM-DD.jsonl`, overridable with `CODEX_DELEGATE_RUNS_DIR`;
+if neither `DSH_HOME` nor that variable is set (bare CI, a hand-started bridge) it falls back to
+`<os.tmpdir()>/dsh-codex-delegate-runs`.
+
+One JSONL file per day, and **every state change appends a line** — the same `runId` written later wins.
+So a run in progress is already readable (`running`, with the steps so far), and a process killed
+mid-run leaves a complete readable file rather than a half-written JSON. A record that outlives the
+bridge process simply stays `running`; nothing repairs it afterwards. Files older than 14 days are
+pruned on the next list. There is no writer lock: the bridge process is the only writer in practice.
+
+### What a record contains
+
+| Field | Meaning |
+| --- | --- |
+| `runId` | one per delegation; `retry_codex_run` creates a **new** one and points back via `parentRunId` |
+| `batchId` | optional `batch_id` argument on `delegate_to_codex`, purely a grouping label |
+| `status` / `kind` | `running` · `succeeded` · `failed` · `cancelled`, plus a machine-readable reason kind |
+| `steps` / `stepCount` / `currentStep` | the digest of the same `codex/event` stream the result header already summarizes |
+| `artifacts` | workspace paths Codex actually touched (from `file_change` events), or paths seen in command activity |
+| `error` | `{kind, detail}` — the failure/cancel reason as recorded |
+| `startedAt` / `finishedAt` / `durationMs` | wall clock; while running, `finishedAt` is `null` |
+| `threadId` / `resumedFrom` / `resumable` | the Codex thread this run used, and whether it can still be continued |
+| `engineGeneration` | generations of the bridge engine since the last retirement; `0` means no engine was live |
+| `promptChars` / `promptHead` | length, plus the **first 200 characters only**, redacted |
+| `result` | tail of the final text, token total, rate-limit window |
+| `workspace` / `mode` / `timeoutSeconds` / `pid` | the request as the bridge pinned it |
+
+`kind` is one of: `timeout`, `policy`, `client_cancel`, `engine_lost`, `tool_error`, `thread_lost`,
+`refused` (the bridge refused before spawning), `completed`.
+
+### Three query/resume tools (all read-only, all additive)
+
+| Tool | What it does |
+| --- | --- |
+| `list_codex_runs {limit?, status?, batch_id?}` | most recent runs, newest first, one line each |
+| `get_codex_run {run_id}` | one record in full: status, kind, failure detail, steps, artifacts, times, thread, resumability |
+| `retry_codex_run {run_id, prompt, timeout_seconds?, include_activity?}` | continues that run's thread (`codex-reply` with the **recorded** `threadId`) and records a new run pointing back at it |
+
+A refusal (a workspace outside the allowed root, `workspace-write` while the gate is off, a thread
+resumed under a different mode) also leaves a record — `failed/refused`, with no thread and no steps —
+and its error text now leads with `Run: <id> [failed/refused]` so the record is findable. The original
+error wording is unchanged below that line.
+
+The bridge also emits an MCP notification `notifications/tools/run` after each run settles. It is a
+notification, not a request: a client that does not know it (including DSH's own bridge today) drops it,
+so **nothing is pushed** — the three tools are the way to read the ledger.
+
+### Cancel · resume · retry-only-failures: what actually works
+
+Nothing new was invented for cancelling. The three cancellation paths already existed; the record now
+names them instead of reporting them as generic failures.
+
+| Capability | Support level | Mechanism / limit |
+| --- | --- | --- |
+| **Cancel** (timeout) | works | the bridge's own wall clock: on `timeout_seconds` it sends `notifications/cancelled` and lets the caller settle, recorded as `cancelled/timeout`. `codex` has no per-turn cancellation that waits for confirmation, so the turn may keep running inside the engine — the record says "we stopped waiting and told it to stop", not "Codex stopped" |
+| **Cancel** (policy mismatch) | works | `session_configured` reports a sandbox/approval/cwd looser than requested ⇒ same cancel path, recorded as `cancelled/policy` |
+| **Cancel** (client) | works, rarely used | an MCP `notifications/cancelled` for an in-flight `tools/call` is mapped to that call's `runId` and recorded as `cancelled/client_cancel`. The transport-level cancel is what DSH itself has never sent, so this path is exercised by the test suite, not by daily use |
+| **Cancel** (explicit "stop run X now" tool) | **not supported** | there is no `cancel_codex_run`: cancelling from the record would need a new kill path, and the repo has none today |
+| **Resume** | works while the engine lives | `retry_codex_run` re-declares nothing — it replays the recorded `threadId` into `codex-reply`, and the original `workspace`/`mode` are reused and re-checked (a resume can never widen them). Codex threads live **in the engine process**, so after an engine crash, or a `CODEX_BRIDGE_REV` bump that remounts the child, the reply fails with `Session not found` and the new run is recorded as `failed/thread_lost`. Records do not survive the bridge process as resumable threads |
+| **Retry** (one run) | works | `retry_codex_run {run_id, prompt}` retries the single run you name, recording lineage through `parentRunId` |
+| **Retry only the failed items of a run** | **not applicable here** | one delegation is exactly **one prompt, one turn** — there is no multi-item list to select from. `steps` are a *digest of what Codex did*, not addressable work items, and re-running a step is impossible: a step is a command Codex already ran inside its own turn. So "only the failed items" collapses to "retry the single failed run" (above). If you need per-item retry, the granularity has to come from the caller: give each item its own `delegate_to_codex` call with a shared `batch_id`, then list that batch and retry the runs whose `status` is `failed`/`cancelled` one `runId` at a time |
+| Push updates while a run is in progress | **not supported** | records are written during the run, but only when something happens (event digested, run settles); a run that produces no events writes nothing, and no client is notified unless it understands `notifications/tools/run` |
+| Per-step retry, run cancellation, cross-restart threads | **not supported** | as above |
+
+Credential hygiene is unchanged and mechanical: every string written to the ledger goes through the same
+`redact()` used for tool results (`Bearer …`, `sk-…`, `api_key/token/secret = …`), the full prompt is
+never stored — only its length and a redacted 200-character head — and the `verify-runs` suite asserts
+that no `Bearer`/`sk-`/`api_key=` plaintext reaches the file.
+
+Measured end to end with the fake engine (`tools/verify-runs.mjs`, 58 assertions): a successful
+delegation produces a complete record; a tool-layer error is `failed/tool_error` with the engine's own
+text; a hung engine is `cancelled/timeout` after the bridge's clock; a killed engine is
+`failed/engine_lost` (and the next delegation reconnects); a client cancel is
+`cancelled/client_cancel`; a retry reuses the recorded `threadId` in `codex-reply` and links back via
+`parentRunId`; `list_codex_runs` is newest-first; and the ledger contains no credential plaintext.
 
 

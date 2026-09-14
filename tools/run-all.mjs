@@ -23,6 +23,7 @@ const CHECKS = []
 
 const SUITES = [
   'tools/verify-engine-restart.mjs',
+  'tools/verify-runs.mjs',
 ]
 
 const EXCLUDED = []
