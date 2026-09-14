@@ -14,6 +14,30 @@ It does not expose the current Codex desktop conversation. It uses the Codex acc
 - `danger-full-access` is never available.
 - The server uses stdio; it does not open a network port.
 
+## Pre-release check (same command in CI and locally)
+
+Every push / PR runs `.github/workflows/ci.yml`, which does exactly one thing: `npm test`.
+That is the same command you run locally — **no dependencies, no network**:
+
+```bash
+npm test                       # = node tools/run-all.mjs
+node tools/run-all.mjs --list  # list what runs, what is excluded, and why
+```
+
+`tools/run-all.mjs` runs every suite to completion before summarizing, so one broken suite never hides
+the next; any non-zero suite makes `npm test` exit 1, which turns CI red.
+CI runs a Node 20/22/24 matrix on `windows-latest` (the suite is written platform-agnostically —
+`process.execPath` + `os.tmpdir` + `path.join`, no shell — but only Windows was actually measured
+on this machine, so no unverified runner was added).
+
+Measured locally (Node 24.9.0):
+
+| Suite | Local result |
+| --- | --- |
+| `tools/verify-engine-restart.mjs` | 3 passed (fake engine = a `mcp-server` script this suite writes itself; real Codex is never called) |
+
+Nothing is excluded in this repo.
+
 ## Get it
 
 The public repository is `dsh-codex-delegate-mcp`; clone it and the folder name

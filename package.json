@@ -10,6 +10,9 @@
   "engines": {
     "node": ">=20"
   },
+  "scripts": {
+    "test": "node tools/run-all.mjs"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Raylen-berry/dsh-codex-delegate-mcp.git"

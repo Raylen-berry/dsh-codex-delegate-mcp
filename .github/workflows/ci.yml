@@ -1,0 +1,33 @@
+name: CI
+
+# 发布前检查：push / PR 都跑同一套离线测试，任一环节非 0 退出即整体失败。
+#
+# 为什么是 windows-latest：这是**本机实测通过的那一档**。套件本身是平台无关写法
+#   （process.execPath + os.tmpdir + path.join，不调 shell、不起子命令），按设计在
+#   macOS/Linux 上应当同样可跑；但本机没有 WSL 发行版也没有 Docker，macOS/Linux
+#   无法实测，所以不把没验证过的平台放进 CI 冒红。要扩到三平台，把 runs-on 改成
+#   `${{ matrix.os }}` 并在 strategy.matrix.os 里加 ubuntu-latest / macos-latest 即可。
+# 为什么是 20/22/24 矩阵：package.json 写的是 engines.node >= 20，所以下界取 20；
+#   22 = 当前 LTS，24 = 本机实测的版本。三档已用**独立下载的** node 实测通过。
+#
+# 全程不联网跑测试：套件用 CODEX_BINARY 指向 node 自身 + 一个自己写出来的假引擎
+#   （名为 mcp-server 的脚本），不调真 Codex、不调模型、不做任何真实下载。
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [20, 22, 24]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+      # npm test = node tools/run-all.mjs：跑完再汇总，任一套失败 ⇒ 退出码 1。
+      # 测试不需要任何依赖，所以没有 npm install（离线可跑）。
+      - run: npm test
